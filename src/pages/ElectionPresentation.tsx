@@ -33,7 +33,7 @@ const ElectionPresentation = () => {
     // Determinar tamanhos
     let posSize = 'w-10 h-10 text-xl';
     let nameSize = 'text-sm';
-    let infoSize = 'text-xs';
+    const infoSize = 'text-xs';
     let imageHeight = 'h-32';
     let gap = 'gap-4';
     let p = 'p-2';

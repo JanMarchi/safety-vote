@@ -10,12 +10,12 @@ export interface AuditLogEntry {
   action: string;
   table_name?: string;
   record_id?: string;
-  old_values?: Record<string, any>;
-  new_values?: Record<string, any>;
+  old_values?: Record<string, unknown>;
+  new_values?: Record<string, unknown>;
   ip_address?: string;
   user_agent?: string;
   created_at?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface VoteAuditEntry {
@@ -400,7 +400,7 @@ export class AuditSystem {
     return crypto.randomBytes(8).toString('hex').toUpperCase();
   }
 
-  private static generateVoteHash(voteData: any): string {
+  private static generateVoteHash(voteData: Record<string, unknown>): string {
     const dataString = JSON.stringify(voteData, Object.keys(voteData).sort());
     return crypto.createHash('sha256').update(dataString).digest('hex');
   }
@@ -480,39 +480,39 @@ export class AuditSystem {
 
 // Middleware para auditoria automática
 export function createAuditMiddleware() {
-  return async (req: any, res: any, next: any) => {
-    const originalSend = res.send;
+  return async (req: Record<string, unknown>, res: Record<string, unknown>, next: (() => void) | undefined) => {
+    const originalSend = (res as Record<string, unknown>).send as ((data: unknown) => void) | undefined;
     const startTime = Date.now();
-    
-    res.send = function(data: any) {
+
+    (res as Record<string, unknown>).send = function(data: unknown) {
       const duration = Date.now() - startTime;
-      
+
       // Log da requisição
       AuditSystem.logAction({
-        action: `API_${req.method}`,
+        action: `API_${(req.method as string) || 'UNKNOWN'}`,
         table_name: 'api_requests',
-        ip_address: req.ip,
-        user_agent: req.get('User-Agent'),
+        ip_address: (req.ip as string) || '127.0.0.1',
+        user_agent: ((req.get as ((key: string) => string) | undefined)?('User-Agent')) || 'Unknown',
         metadata: {
           path: req.path,
           method: req.method,
-          status_code: res.statusCode,
+          status_code: (res as Record<string, unknown>).statusCode,
           duration,
-          user_id: req.user?.id
+          user_id: (req.user as Record<string, string> | undefined)?.id
         }
       });
-      
-      originalSend.call(this, data);
+
+      originalSend?.call(this, data);
     };
-    
-    next();
+
+    next?.();
   };
 }
 
 // Hook para auditoria de mudanças no banco
 export function createDatabaseAuditHook() {
   return {
-    beforeInsert: async (table: string, data: any, userId?: string) => {
+    beforeInsert: async (table: string, data: Record<string, unknown>, userId?: string) => {
       await AuditSystem.logAction({
         user_id: userId,
         action: 'INSERT',
@@ -520,8 +520,8 @@ export function createDatabaseAuditHook() {
         new_values: data
       });
     },
-    
-    beforeUpdate: async (table: string, id: string, oldData: any, newData: any, userId?: string) => {
+
+    beforeUpdate: async (table: string, id: string, oldData: Record<string, unknown>, newData: Record<string, unknown>, userId?: string) => {
       await AuditSystem.logAction({
         user_id: userId,
         action: 'UPDATE',
@@ -531,8 +531,8 @@ export function createDatabaseAuditHook() {
         new_values: newData
       });
     },
-    
-    beforeDelete: async (table: string, id: string, data: any, userId?: string) => {
+
+    beforeDelete: async (table: string, id: string, data: Record<string, unknown>, userId?: string) => {
       await AuditSystem.logAction({
         user_id: userId,
         action: 'DELETE',

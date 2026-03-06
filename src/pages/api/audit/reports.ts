@@ -120,7 +120,7 @@ export default async function handler(
     });
 
     let reportData;
-    let totalCount = 0;
+    const totalCount = 0;
 
     // Gerar relatório baseado no tipo
     switch (report_type) {

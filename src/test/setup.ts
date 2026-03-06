@@ -58,20 +58,23 @@ jest.mock('next/router', () => ({
   }),
 }));
 
-// Mock do window.location
-Object.defineProperty(window, 'location', {
-  value: {
-    href: 'http://localhost:3000',
-    origin: 'http://localhost:3000',
-    pathname: '/',
-    search: '',
-    hash: '',
-    assign: jest.fn(),
-    replace: jest.fn(),
-    reload: jest.fn(),
-  },
-  writable: true,
-});
+// Mock do window.location - avoid modifying read-only location object
+if (!window.location.href) {
+  Object.defineProperty(window, 'location', {
+    value: {
+      href: 'http://localhost:3000',
+      origin: 'http://localhost:3000',
+      pathname: '/',
+      search: '',
+      hash: '',
+      assign: jest.fn(),
+      replace: jest.fn(),
+      reload: jest.fn(),
+    },
+    writable: false,
+    configurable: true,
+  });
+}
 
 // Mock do localStorage
 const localStorageMock = {

@@ -2,7 +2,7 @@
 // Implementação segura para Safety Vote
 
 import { supabase } from '../supabase';
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 export interface MagicLinkOptions {
   email: string;
