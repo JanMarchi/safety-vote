@@ -22,18 +22,28 @@ export interface AuthToken {
   created_at: string;
 }
 
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  company_id: string;
+  email_verified?: boolean;
+  last_login?: string;
+}
+
 export interface AuthResponse {
   success: boolean;
   message: string;
   token?: string;
-  user?: any;
+  user?: User;
   error?: string;
 }
 
 // Classe principal para gerenciar autenticação com magic links
 export class MagicLinkAuth {
-  private static readonly TOKEN_EXPIRY_MINUTES = 15;
-  private static readonly MAX_ATTEMPTS_PER_HOUR = 5;
+  private static readonly TOKEN_EXPIRY_MINUTES = 24 * 60; // 24 hours
+  private static readonly MAX_ATTEMPTS_PER_10_MINUTES = 5;
   
   /**
    * Gera um token seguro para magic link
@@ -79,23 +89,23 @@ export class MagicLinkAuth {
   }
 
   /**
-   * Verifica limite de tentativas por IP
+   * Verifica limite de tentativas por IP (máx 5 por 10 minutos)
    */
   private static async checkRateLimit(ipAddress: string): Promise<boolean> {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
     const { data, error } = await supabase
       .from('auth_tokens')
       .select('id')
       .eq('ip_address', ipAddress)
-      .gte('created_at', oneHourAgo);
-    
+      .gte('created_at', tenMinutesAgo);
+
     if (error) {
       console.error('Erro ao verificar rate limit:', error);
       return false;
     }
-    
-    return (data?.length || 0) < this.MAX_ATTEMPTS_PER_HOUR;
+
+    return (data?.length || 0) < this.MAX_ATTEMPTS_PER_10_MINUTES;
   }
 
   /**
@@ -126,7 +136,7 @@ export class MagicLinkAuth {
       if (ipAddress && !(await this.checkRateLimit(ipAddress))) {
         return {
           success: false,
-          message: 'Muitas tentativas. Tente novamente em 1 hora.'
+          message: 'Muitas tentativas. Tente novamente em 10 minutos.'
         };
       }
       
@@ -242,7 +252,7 @@ export class MagicLinkAuth {
         };
       }
       
-      const authToken = tokens as AuthToken & { users: any };
+      const authToken = tokens as AuthToken & { users: User };
       
       // Marcar token como usado
       const { error: updateError } = await supabase
@@ -479,38 +489,52 @@ export class MagicLinkAuth {
 }
 
 // Função utilitária para obter IP do cliente
-export function getClientIP(req: any): string {
-  return req.headers['x-forwarded-for'] || 
-         req.headers['x-real-ip'] || 
-         req.connection.remoteAddress || 
-         req.socket.remoteAddress ||
-         (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
+export function getClientIP(req: Record<string, unknown>): string {
+  const headers = req.headers as Record<string, string | string[] | undefined>;
+  const connection = req.connection as Record<string, unknown> | undefined;
+  const socket = req.socket as Record<string, unknown> | undefined;
+
+  const xForwardedFor = headers['x-forwarded-for'];
+  const xRealIp = headers['x-real-ip'];
+  const connectionRemote = connection?.remoteAddress;
+  const socketRemote = socket?.remoteAddress;
+  const connectionSocketRemote = (connection?.socket as Record<string, unknown> | undefined)?.remoteAddress;
+
+  return (typeof xForwardedFor === 'string' ? xForwardedFor : '') ||
+         (typeof xRealIp === 'string' ? xRealIp : '') ||
+         (typeof connectionRemote === 'string' ? connectionRemote : '') ||
+         (typeof socketRemote === 'string' ? socketRemote : '') ||
+         (typeof connectionSocketRemote === 'string' ? connectionSocketRemote : '') ||
          '127.0.0.1';
 }
 
 // Middleware para rate limiting
 export function createRateLimiter(windowMs: number = 60000, max: number = 5) {
-  const requests = new Map();
-  
-  return (req: any, res: any, next: any) => {
+  const requests = new Map<string, number[]>();
+
+  return (req: Record<string, unknown>, res: Record<string, unknown>, next: (() => void) | undefined) => {
     const ip = getClientIP(req);
     const now = Date.now();
     const windowStart = now - windowMs;
-    
+
     // Limpar requests antigos
     const userRequests = requests.get(ip) || [];
     const validRequests = userRequests.filter((time: number) => time > windowStart);
-    
+
     if (validRequests.length >= max) {
-      return res.status(429).json({
+      const resTyped = res as Record<string, unknown>;
+      const statusFn = resTyped.status as ((code: number) => Record<string, unknown>) | undefined;
+      const jsonFn = statusFn?.(429)?.json as ((data: Record<string, unknown>) => void) | undefined;
+      jsonFn?.({
         success: false,
         message: 'Muitas tentativas. Tente novamente mais tarde.'
       });
+      return;
     }
-    
+
     validRequests.push(now);
     requests.set(ip, validRequests);
-    
-    next();
+
+    next?.();
   };
 }

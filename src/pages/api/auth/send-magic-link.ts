@@ -18,8 +18,8 @@ interface ApiResponse {
   token?: string; // Apenas em desenvolvimento
 }
 
-// Rate limiter: máximo 5 tentativas por IP por hora
-const rateLimiter = createRateLimiter(60 * 60 * 1000, 5);
+// Rate limiter: máximo 5 tentativas por IP por 10 minutos
+const rateLimiter = createRateLimiter(10 * 60 * 1000, 5);
 
 export default async function handler(
   req: NextApiRequest,
@@ -36,7 +36,7 @@ export default async function handler(
   try {
     // Aplicar rate limiting
     await new Promise<void>((resolve, reject) => {
-      rateLimiter(req, res, (error?: any) => {
+      rateLimiter(req, res, (error?: Error | null) => {
         if (error) reject(error);
         else resolve();
       });
