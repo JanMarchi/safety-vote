@@ -1,29 +1,79 @@
 -- ============================================================================
 -- Migration: 002_row_level_security.sql
--- Purpose: Implement Row Level Security (RLS) policies for multi-tenant isolation
+-- Purpose: Rewrite RLS policies for multi-tenant isolation (simplified model)
 -- Date: 2026-03-06
 -- Story: STORY-1.2 (Implement Row Level Security Policies)
 -- ============================================================================
 --
--- This migration creates comprehensive RLS policies for the Safety Vote system,
--- ensuring that users can only access data belonging to their company (multi-tenant
--- isolation). RLS enforces data isolation at the database layer, preventing
--- unauthorized cross-tenant access even if application logic has bugs.
+-- This migration REPLACES the initial RLS policies with a simplified,
+-- unified policy model for the Safety Vote system. It drops all policies
+-- from the initial migration and creates new simplified policies that enforce:
+--   - Company-level isolation for all tables
+--   - Admin bypass via is_admin() function
+--   - Simplified WHERE conditions (no role-specific logic, only company checks)
 --
--- Tables covered:
---   1. companies - Admin-only access (prevent regular users from accessing company data)
---   2. users - Company-level isolation (users see only their company's users)
---   3. elections - Company-level isolation (users see only their company's elections)
---   4. candidates - Via elections → companies (users see only candidates for their elections)
---   5. votes - Via elections → companies (users see only votes for their elections)
---   6. audit_logs - Company-level tracking (users see only their company's logs)
+-- Tables affected:
+--   1. companies - Admin-only access
+--   2. users - Company-level isolation
+--   3. elections - Company-level isolation
+--   4. candidates - Company-level isolation (via elections)
+--   5. votes - Company-level isolation (via elections)
+--   6. audit_logs - Company-level isolation
 --
--- RLS Policy Pattern:
---   - Regular users see only rows matching their company_id
---   - Admin users with elevated privileges can access all rows
---   - Policies use auth.user_company_id() and is_admin() helper functions
---   - Performance optimized with indexes on company_id columns
+-- NOTE: auth_tokens and user_sessions keep original policies (user-based, not company-based)
 --
+-- ============================================================================
+
+-- ============================================================================
+-- DROP OLD POLICIES (from initial setup migration)
+-- ============================================================================
+
+-- Drop all companies policies
+DROP POLICY IF EXISTS "Admins can view all companies" ON companies;
+DROP POLICY IF EXISTS "Users can view their own company" ON companies;
+DROP POLICY IF EXISTS "Admins can manage all companies" ON companies;
+
+-- Drop all users policies
+DROP POLICY IF EXISTS "Admins can view all users" ON users;
+DROP POLICY IF EXISTS "RH and admins can view users from same company" ON users;
+DROP POLICY IF EXISTS "Users can view their own profile" ON users;
+DROP POLICY IF EXISTS "Admins can manage all users" ON users;
+DROP POLICY IF EXISTS "RH can manage users from same company" ON users;
+DROP POLICY IF EXISTS "Users can update their own profile" ON users;
+
+-- Drop all elections policies
+DROP POLICY IF EXISTS "Admins can view all elections" ON elections;
+DROP POLICY IF EXISTS "Users can view elections from their company" ON elections;
+DROP POLICY IF EXISTS "Admins can manage all elections" ON elections;
+DROP POLICY IF EXISTS "RH can manage elections from same company" ON elections;
+
+-- Drop all candidates policies
+DROP POLICY IF EXISTS "Admins can view all candidates" ON candidates;
+DROP POLICY IF EXISTS "Users can view candidates from elections in their company" ON candidates;
+DROP POLICY IF EXISTS "Admins can manage all candidates" ON candidates;
+DROP POLICY IF EXISTS "RH can manage candidates from same company elections" ON candidates;
+DROP POLICY IF EXISTS "Users can register as candidates" ON candidates;
+
+-- Drop all votes policies
+DROP POLICY IF EXISTS "Admins can view all votes" ON votes;
+DROP POLICY IF EXISTS "RH can view votes from same company elections" ON votes;
+DROP POLICY IF EXISTS "Users can view their own votes" ON votes;
+DROP POLICY IF EXISTS "Users can cast votes in their company elections" ON votes;
+DROP POLICY IF EXISTS "Admins can manage all votes" ON votes;
+
+-- Drop all audit_logs policies
+DROP POLICY IF EXISTS "Admins can view all audit logs" ON audit_logs;
+DROP POLICY IF EXISTS "RH can view audit logs from same company" ON audit_logs;
+DROP POLICY IF EXISTS "Users can view their own audit logs" ON audit_logs;
+DROP POLICY IF EXISTS "System can insert audit logs" ON audit_logs;
+DROP POLICY IF EXISTS "Admins can manage all audit logs" ON audit_logs;
+
+-- NOTE: auth_tokens and user_sessions policies are user-specific, not company-specific
+-- They are NOT dropped/replaced because they follow a different access pattern
+-- (user can only see their own tokens/sessions) which doesn't conflict with company-based policies
+
+-- ============================================================================
+-- CREATE NEW SIMPLIFIED POLICIES
 -- ============================================================================
 
 -- ============================================================================
