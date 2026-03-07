@@ -35,6 +35,7 @@ export interface JWTPayload {
   exp: number; // expiration time
   iss: string; // issuer
   aud: string; // audience
+  jti?: string; // JWT ID - unique identifier for this token (prevents duplicate tokens)
 }
 
 export interface TokenPair {
@@ -82,6 +83,10 @@ export function generateAccessToken(
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = now + TOKEN_EXPIRY.ACCESS_TOKEN;
 
+  // Generate unique JWT ID to prevent token collision
+  // Uses current timestamp + random nonce for uniqueness
+  const jti = `${sessionId}.${Date.now()}.${Math.random().toString(36).substring(7)}`;
+
   const payload: JWTPayload = {
     sub: userId,
     session_id: sessionId,
@@ -92,7 +97,8 @@ export function generateAccessToken(
     iat: now,
     exp: expiresAt,
     iss: 'safety-vote',
-    aud: 'safety-vote'
+    aud: 'safety-vote',
+    jti
   };
 
   // In a real implementation, this would use a JWT library like jsonwebtoken
@@ -149,11 +155,22 @@ export function verifyTokenHash(token: string, tokenHash: string): boolean {
 /**
  * Verify access token signature and expiration
  *
+ * Validates:
+ * - JWT signature using HMAC-SHA256
+ * - Token format (3 parts separated by dots)
+ * - Token hasn't expired
+ * - Required claims present
+ *
  * @param token - JWT access token
  * @returns Decoded JWT payload if valid, null if invalid
  */
 export function verifyAccessToken(token: string): JWTPayload | null {
   try {
+    // Verify signature first
+    if (!verifyJWTSignature(token)) {
+      return null;
+    }
+
     const payload = decodeJWT(token);
 
     if (!payload) {
@@ -207,6 +224,45 @@ function createJWT(payload: JWTPayload): string {
 
   // Return complete JWT
   return `${message}.${signature}`;
+}
+
+/**
+ * Verify JWT signature using HMAC-SHA256
+ *
+ * Ensures token hasn't been tampered with by validating
+ * the signature against the payload using the secret key.
+ *
+ * @param token - JWT token string
+ * @returns true if signature is valid, false otherwise
+ */
+function verifyJWTSignature(token: string): boolean {
+  try {
+    const parts = token.split('.');
+
+    if (parts.length !== 3) {
+      return false;
+    }
+
+    const headerB64 = parts[0];
+    const payloadB64 = parts[1];
+    const providedSignature = parts[2];
+
+    // Recreate the message that was signed
+    const message = `${headerB64}.${payloadB64}`;
+
+    // Get the secret and compute expected signature
+    const secret = process.env.SUPABASE_JWT_SECRET || 'dev-secret-key';
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(message)
+      .digest('base64url');
+
+    // Use constant-time comparison to prevent timing attacks
+    return constantTimeCompare(providedSignature, expectedSignature);
+  } catch (error) {
+    console.error('Error verifying JWT signature:', error);
+    return false;
+  }
 }
 
 /**
