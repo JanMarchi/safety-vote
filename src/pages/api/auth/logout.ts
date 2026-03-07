@@ -1,15 +1,29 @@
-// API para logout
-// Endpoint para encerrar sessões de usuários
+/**
+ * POST /api/auth/logout
+ *
+ * Logout user and revoke session
+ *
+ * Request (with Authorization header):
+ * Headers: Authorization: Bearer {access_token}
+ *
+ * Response:
+ * {
+ *   "success": true,
+ *   "message": "You have been logged out successfully"
+ * }
+ */
 
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { MagicLinkAuth, getClientIP } from '../../../lib/auth/magic-link';
+import { supabase } from '../../../lib/supabase';
+import { verifyAccessToken, hashToken } from '../../../lib/session/token-handler';
 import { AuditSystem } from '../../../lib/audit/audit-system';
+import { extractClientIP } from '../../../lib/session/device-fingerprint';
 
 interface LogoutRequest {
-  session_token: string;
+  access_token?: string;
 }
 
-interface ApiResponse {
+interface LogoutResponse {
   success: boolean;
   message: string;
   error?: string;
@@ -17,119 +31,187 @@ interface ApiResponse {
 
 export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse<ApiResponse>
+  res: NextApiResponse<LogoutResponse>
 ) {
-  // Apenas métodos POST são permitidos
+  // Only POST requests allowed
   if (req.method !== 'POST') {
     return res.status(405).json({
       success: false,
-      message: 'Método não permitido'
+      message: 'Method not allowed',
+      error: 'only_post_allowed'
     });
   }
 
+  const clientIP = extractClientIP(req.headers as Record<string, string | string[]>);
+  const userAgent = req.headers['user-agent'] || 'Unknown';
+
   try {
-    const { session_token }: LogoutRequest = req.body;
-    const clientIP = getClientIP(req);
-    const userAgent = req.headers['user-agent'] || 'Unknown';
+    // Get access token from Authorization header
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
 
-    // Validações básicas
-    if (!session_token || typeof session_token !== 'string') {
-      return res.status(400).json({
-        success: false,
-        message: 'Token de sessão é obrigatório'
-      });
-    }
-
-    // Validar formato do token
-    if (!/^[a-f0-9]{64}$/i.test(session_token)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Token de sessão inválido'
-      });
-    }
-
-    // Primeiro, validar a sessão para obter informações do usuário
-    const sessionResult = await MagicLinkAuth.validateSession(session_token);
-    
-    let userId: string | undefined;
-    if (sessionResult.success && sessionResult.user) {
-      userId = sessionResult.user.id;
-    }
-
-    // Encerrar sessão
-    const result = await MagicLinkAuth.endSession(session_token);
-
-    if (result.success) {
-      // Log de logout bem-sucedido
-      await AuditSystem.logAction({
-        user_id: userId,
-        action: 'LOGOUT_SUCCESS',
-        table_name: 'user_sessions',
+    if (!token) {
+      await AuditSystem.logSecurityEvent({
+        type: 'suspicious_activity',
+        severity: 'medium',
         ip_address: clientIP,
-        user_agent: userAgent,
+        description: 'Logout attempt without access token',
         metadata: {
-          logout_method: 'manual',
-          session_ended: true
+          user_agent: userAgent,
+          endpoint: '/api/auth/logout'
         }
       });
 
-      // Log de evento de segurança
+      return res.status(401).json({
+        success: false,
+        message: 'No active session found',
+        error: 'not_authenticated'
+      });
+    }
+
+    // Verify the access token
+    const jwtPayload = verifyAccessToken(token);
+
+    if (!jwtPayload) {
       await AuditSystem.logSecurityEvent({
-        type: 'logout',
-        severity: 'low',
-        user_id: userId,
+        type: 'suspicious_activity',
+        severity: 'medium',
         ip_address: clientIP,
-        description: 'Logout realizado com sucesso',
+        description: 'Logout attempt with invalid access token',
         metadata: {
-          logout_method: 'manual',
           user_agent: userAgent
         }
       });
 
-      return res.status(200).json({
-        success: true,
-        message: result.message
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired access token',
+        error: 'invalid_token'
       });
+    }
 
-    } else {
-      // Log de falha no logout
-      await AuditSystem.logAction({
+    const sessionId = jwtPayload.session_id;
+    const userId = jwtPayload.sub;
+    const companyId = jwtPayload.company_id;
+
+    // Find and revoke the session
+    const { data: sessionData, error: fetchError } = await supabase
+      .from('user_sessions')
+      .select('id, user_id, company_id, is_active')
+      .eq('id', sessionId)
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError || !sessionData) {
+      await AuditSystem.logSecurityEvent({
+        type: 'suspicious_activity',
+        severity: 'medium',
         user_id: userId,
-        action: 'LOGOUT_FAILED',
-        table_name: 'user_sessions',
         ip_address: clientIP,
-        user_agent: userAgent,
+        description: 'Logout attempt - session not found',
         metadata: {
-          error: result.message,
-          logout_method: 'manual'
+          user_agent: userAgent,
+          session_id: sessionId
         }
       });
 
       return res.status(400).json({
         success: false,
-        message: result.message,
-        error: result.error
+        message: 'Session not found or already revoked',
+        error: 'invalid_session'
       });
     }
 
-  } catch (error) {
-    console.error('Erro no logout:', error);
+    // Check if session is already revoked
+    if (!sessionData.is_active) {
+      return res.status(200).json({
+        success: true,
+        message: 'You have been logged out successfully'
+      });
+    }
 
-    // Log do erro
+    // Revoke the session
+    const { error: updateError } = await supabase
+      .from('user_sessions')
+      .update({
+        revoked_at: new Date().toISOString()
+      })
+      .eq('id', sessionId)
+      .eq('user_id', userId);
+
+    if (updateError) {
+      console.error('Error revoking session:', updateError);
+
+      await AuditSystem.logSecurityEvent({
+        type: 'suspicious_activity',
+        severity: 'high',
+        user_id: userId,
+        ip_address: clientIP,
+        description: 'Error revoking session during logout',
+        metadata: {
+          user_agent: userAgent,
+          session_id: sessionId,
+          error: updateError.message
+        }
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+        error: 'internal_error'
+      });
+    }
+
+    // Log successful logout
+    await AuditSystem.logAction({
+      user_id: userId,
+      action: 'LOGOUT_SUCCESS',
+      table_name: 'user_sessions',
+      ip_address: clientIP,
+      user_agent: userAgent,
+      metadata: {
+        session_id: sessionId,
+        company_id: companyId,
+        logout_method: 'manual'
+      }
+    });
+
+    // Log security event
+    await AuditSystem.logSecurityEvent({
+      type: 'logout',
+      severity: 'low',
+      user_id: userId,
+      ip_address: clientIP,
+      description: 'User logged out successfully',
+      metadata: {
+        user_agent: userAgent,
+        session_id: sessionId
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'You have been logged out successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in logout endpoint:', error);
+
     await AuditSystem.logSecurityEvent({
       type: 'suspicious_activity',
-      severity: 'medium',
-      ip_address: getClientIP(req),
-      description: 'Erro interno na API de logout',
+      severity: 'high',
+      ip_address: clientIP,
+      description: 'Unexpected error in logout endpoint',
       metadata: {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        user_agent: req.headers['user-agent']
+        user_agent: userAgent,
+        error: error instanceof Error ? error.message : 'Unknown error'
       }
     });
 
     return res.status(500).json({
       success: false,
-      message: 'Erro interno do servidor'
+      message: 'Internal server error',
+      error: 'internal_error'
     });
   }
 }
