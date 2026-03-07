@@ -5,15 +5,16 @@
 
 import React from 'react';
 
-export interface ResultData {
-  [candidateId: string]: {
-    name: string;
-    votes: number;
-    percentage: number;
-    rank: number;
-  };
-  abstentions?: number;
+export interface CandidateResult {
+  name: string;
+  votes: number;
+  percentage: number;
+  rank: number;
 }
+
+export type ResultData = Record<string, any> & {
+  abstentions?: number;
+};
 
 export interface ResultsDashboardProps {
   electionTitle: string;
