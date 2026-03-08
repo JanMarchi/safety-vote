@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
-package-lock.json
+# Package lock files are committed for reproducible builds
+# package-lock.json  # KEEP for CI/CD builds
 yarn.lock
 pnpm-lock.yaml
 bun.lockb
