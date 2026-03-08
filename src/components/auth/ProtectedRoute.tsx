@@ -128,7 +128,7 @@ export default function ProtectedRoute({
   fallback,
   redirectTo
 }: ProtectedRouteProps) {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, hasRole } = useAuth();
   
   // Se está carregando, mostrar tela de loading
   if (loading) {
@@ -142,8 +142,6 @@ export default function ProtectedRoute({
   
   // Se tem roles específicas requeridas
   if (requiredRoles && isAuthenticated) {
-    const { hasRole } = useAuth();
-    
     if (!hasRole(requiredRoles)) {
       return fallback || <AccessDeniedScreen requiredRoles={requiredRoles} />;
     }

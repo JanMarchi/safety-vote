@@ -124,7 +124,7 @@ export default async function handler(
 
     // Gerar relatório baseado no tipo
     switch (report_type) {
-      case 'general':
+      case 'general': {
         reportData = await AuditSystem.generateAuditReport({
           start_date: start_date ? new Date(start_date) : undefined,
           end_date: end_date ? new Date(end_date) : undefined,
@@ -135,8 +135,9 @@ export default async function handler(
           offset
         });
         break;
+      }
 
-      case 'security':
+      case 'security': {
         const securityFilters = {
           start_date: start_date ? new Date(start_date) : undefined,
           end_date: end_date ? new Date(end_date) : undefined,
@@ -152,8 +153,9 @@ export default async function handler(
           event_type: 'security'
         });
         break;
+      }
 
-      case 'votes':
+      case 'votes': {
         reportData = await AuditSystem.searchAuditLogs({
           start_date: start_date ? new Date(start_date) : undefined,
           end_date: end_date ? new Date(end_date) : undefined,
@@ -164,8 +166,9 @@ export default async function handler(
           offset
         });
         break;
+      }
 
-      case 'users':
+      case 'users': {
         reportData = await AuditSystem.searchAuditLogs({
           start_date: start_date ? new Date(start_date) : undefined,
           end_date: end_date ? new Date(end_date) : undefined,
@@ -176,8 +179,9 @@ export default async function handler(
           offset
         });
         break;
+      }
 
-      case 'elections':
+      case 'elections': {
         reportData = await AuditSystem.searchAuditLogs({
           start_date: start_date ? new Date(start_date) : undefined,
           end_date: end_date ? new Date(end_date) : undefined,
@@ -188,6 +192,7 @@ export default async function handler(
           offset
         });
         break;
+      }
 
       default:
         return res.status(400).json({

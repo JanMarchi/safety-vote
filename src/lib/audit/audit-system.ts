@@ -492,7 +492,7 @@ export function createAuditMiddleware() {
         action: `API_${(req.method as string) || 'UNKNOWN'}`,
         table_name: 'api_requests',
         ip_address: (req.ip as string) || '127.0.0.1',
-        user_agent: ((req.get as ((key: string) => string) | undefined)?('User-Agent')) || 'Unknown',
+        user_agent: (req as any).get?.('User-Agent') || 'Unknown',
         metadata: {
           path: req.path,
           method: req.method,

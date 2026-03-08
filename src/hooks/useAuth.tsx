@@ -264,3 +264,4 @@ export function useRedirectIfAuthenticated(redirectTo: string = '/dashboard') {
 
   return { isAuthenticated, loading };
 }
+
